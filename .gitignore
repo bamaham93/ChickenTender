@@ -208,3 +208,5 @@ __marimo__/
 
 pythonanywhere_deploy_key
 pythonanywhere_deploy_key.pub
+
+.env

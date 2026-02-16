@@ -5,8 +5,8 @@ from .models import DiningSession, Restaurant, SessionParticipant, SwipeDecision
 
 @admin.register(Restaurant)
 class RestaurantAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "created_at")
-    search_fields = ("name",)
+    list_display = ("id", "name", "place_id", "rating", "created_at")
+    search_fields = ("name", "place_id")
     ordering = ("name",)
 
 

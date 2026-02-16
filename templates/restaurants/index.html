@@ -11,6 +11,48 @@
 </div>
 
 <div class="card ct-panel mb-4">
+  <div class="card-header">Find Restaurants By Location</div>
+  <div class="card-body">
+    <p class="small text-muted mb-2">Enter ZIP, city, or address.</p>
+    {% if location_label %}
+    <div class="alert alert-light border mb-3 py-2">
+      Active location: <strong>{{ location_label }}</strong>
+    </div>
+    {% endif %}
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-6">
+        <input
+          id="location-query"
+          type="text"
+          class="form-control"
+          placeholder="e.g. 60614 or Chicago"
+        />
+      </div>
+      <div class="col-6 col-md-3 d-grid">
+        <button id="search-location-btn" type="button" class="btn btn-primary">
+          Search Area
+        </button>
+      </div>
+      <div class="col-6 col-md-3 d-grid">
+        <button id="use-device-location-btn" type="button" class="btn btn-outline-secondary">
+          Use My Location
+        </button>
+      </div>
+      <div class="col-12">
+        <form method="get" action="{% url 'restaurants:index' %}">
+          <input type="hidden" name="clear_location" value="1" />
+          {% if selected_session %}
+          <input type="hidden" name="session" value="{{ selected_session.id }}" />
+          {% endif %}
+          <button type="submit" class="btn btn-link p-0 text-decoration-none">Clear location</button>
+        </form>
+      </div>
+    </div>
+    <div id="location-status" class="small text-muted mt-2"></div>
+  </div>
+</div>
+
+<div class="card ct-panel mb-4">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span>Swipe</span>
     <div class="d-flex align-items-center gap-2">
@@ -29,18 +71,22 @@
   </div>
   <div class="card-body">
     {% if user.is_authenticated and selected_session %}
-    <p class="small text-muted mb-2">Invite code: <code>{{ selected_session.invite_code }}</code></p>
+    <p class="small text-muted mb-2">Use the session controls below to copy or share access.</p>
     {% endif %}
     <div id="swipe-app" style="max-width: 460px;">
       <div id="status" class="small text-muted mb-2"></div>
       <div id="card" class="card shadow-sm" style="touch-action: pan-y; user-select: none;">
         <div class="card-body">
           <h3 class="h5 card-title" id="card-title"></h3>
-          <p class="card-text mb-0">Drag left or right, or use buttons.</p>
+          <p class="card-text mb-1" id="card-address"></p>
+          <p class="card-text mb-1 small text-muted" id="card-meta"></p>
+          <p class="card-text mb-0 text-muted">Drag left or right, or use buttons.</p>
         </div>
       </div>
       <div class="d-grid gap-2 d-sm-flex mt-3">
         <button id="disapprove-btn" class="btn btn-outline-danger flex-fill">Disapprove</button>
+        <button id="not-sure-btn" class="btn btn-outline-secondary flex-fill">Not Sure</button>
+        <button id="details-btn" class="btn btn-outline-primary flex-fill">Details</button>
         <button id="approve-btn" class="btn btn-success flex-fill">Approve</button>
       </div>
     </div>
@@ -110,7 +156,6 @@
           <tr>
             <th>Session</th>
             <th>Time</th>
-            <th>Invite</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -119,7 +164,6 @@
           <tr>
             <td>{{ session.name }}</td>
             <td>{{ session.proposed_time }}</td>
-            <td><code>{{ session.invite_code }}</code></td>
             <td class="d-flex gap-2">
               <button
                 type="button"
@@ -130,10 +174,11 @@
               </button>
               <button
                 type="button"
-                class="btn btn-sm btn-outline-primary copy-share-link-btn"
+                class="btn btn-sm btn-outline-primary share-link-btn"
                 data-share-url="{{ session.share_url }}"
+                data-session-name="{{ session.name }}"
               >
-                Copy Link
+                Share Link
               </button>
             </td>
           </tr>
@@ -148,21 +193,73 @@
 </div>
 {% endif %}
 
+<div class="modal fade" id="restaurant-details-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5 mb-0" id="modal-restaurant-name">Restaurant Details</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="modal-warning" class="alert alert-warning d-none py-2"></div>
+        <div><strong>Address:</strong> <span id="modal-address">Unavailable</span></div>
+        <div><strong>Status:</strong> <span id="modal-status">Unavailable</span></div>
+        <div><strong>Rating:</strong> <span id="modal-rating">N/A</span></div>
+        <div><strong>Ratings Count:</strong> <span id="modal-ratings-total">N/A</span></div>
+        <div><strong>Price Level:</strong> <span id="modal-price-level">N/A</span></div>
+        <div><strong>Phone:</strong> <span id="modal-phone">Unavailable</span></div>
+        <div class="mt-2">
+          <a id="modal-website" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-primary d-none">Website</a>
+          <a id="modal-map-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-secondary d-none">Map</a>
+        </div>
+        <hr />
+        <div class="small text-muted mb-1">Hours</div>
+        <ul id="modal-hours" class="mb-0 small"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   (function () {
-    const restaurants = JSON.parse(document.getElementById("restaurants-data").textContent);
+    let restaurants = JSON.parse(document.getElementById("restaurants-data").textContent);
     const selectedSessionId = "{{ selected_session.id|default:'' }}";
     const card = document.getElementById("card");
     const cardTitle = document.getElementById("card-title");
+    const cardAddress = document.getElementById("card-address");
+    const cardMeta = document.getElementById("card-meta");
     const status = document.getElementById("status");
     const approveBtn = document.getElementById("approve-btn");
     const disapproveBtn = document.getElementById("disapprove-btn");
+    const notSureBtn = document.getElementById("not-sure-btn");
+    const detailsBtn = document.getElementById("details-btn");
+    const locationQueryInput = document.getElementById("location-query");
+    const searchLocationBtn = document.getElementById("search-location-btn");
+    const deviceLocationBtn = document.getElementById("use-device-location-btn");
+    const locationStatus = document.getElementById("location-status");
 
-    if (!card || !cardTitle || !status || !approveBtn || !disapproveBtn) return;
+    if (!card || !cardTitle || !cardAddress || !cardMeta || !status || !approveBtn || !disapproveBtn || !notSureBtn || !detailsBtn) return;
+    const detailsModalElement = document.getElementById("restaurant-details-modal");
+    let detailsModal = null;
+
+    function getDetailsModal() {
+      if (detailsModal) return detailsModal;
+      if (!detailsModalElement || !window.bootstrap) return null;
+      detailsModal = new window.bootstrap.Modal(detailsModalElement);
+      return detailsModal;
+    }
 
     let index = 0;
     let startX = 0;
     let dragging = false;
+    let loadingDetails = false;
+
+    function priceLevelToDollars(level) {
+      if (level === null || level === undefined || Number.isNaN(Number(level))) return "N/A";
+      const normalized = Math.max(0, Number(level));
+      if (normalized === 0) return "Free";
+      return "$".repeat(normalized);
+    }
 
     function currentRestaurant() {
       return restaurants[index] || null;
@@ -173,6 +270,8 @@
         card.classList.add("d-none");
         approveBtn.disabled = true;
         disapproveBtn.disabled = true;
+        notSureBtn.disabled = true;
+        detailsBtn.disabled = true;
         status.textContent = "Select or join a session to start swiping.";
         return;
       }
@@ -182,6 +281,8 @@
         card.classList.add("d-none");
         approveBtn.disabled = true;
         disapproveBtn.disabled = true;
+        notSureBtn.disabled = true;
+        detailsBtn.disabled = true;
         status.textContent = "No more restaurants to swipe in this session.";
         return;
       }
@@ -189,8 +290,14 @@
       card.classList.remove("d-none");
       approveBtn.disabled = false;
       disapproveBtn.disabled = false;
+      notSureBtn.disabled = false;
+      detailsBtn.disabled = false;
       card.style.transform = "translateX(0px) rotate(0deg)";
       cardTitle.textContent = item.name;
+      cardAddress.textContent = item.formatted_address || "Address unavailable";
+      const ratingText = item.rating ? `${item.rating}/5` : "N/A";
+      const priceText = priceLevelToDollars(item.price_level);
+      cardMeta.textContent = `Rating: ${ratingText} | Price: ${priceText}`;
       status.textContent = "Restaurant " + (index + 1) + " of " + restaurants.length;
     }
 
@@ -205,6 +312,35 @@
         }
       }
       return "";
+    }
+
+    async function fetchRestaurantsByLocation(payload) {
+      if (!locationStatus) return;
+      locationStatus.textContent = "Searching restaurants...";
+
+      const response = await fetch("{% url 'restaurants:search_restaurants_by_location' %}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCsrfToken()
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        locationStatus.textContent = data.error || "Unable to load restaurants for that location.";
+        return;
+      }
+
+      restaurants = data.restaurants || [];
+      index = 0;
+      renderCard();
+      if (!restaurants.length) {
+        locationStatus.textContent = "No restaurants found for that area.";
+        return;
+      }
+      locationStatus.textContent = `Loaded ${restaurants.length} restaurants near ${data.location_label}.`;
     }
 
     async function submitDecision(decision) {
@@ -237,6 +373,131 @@
 
       index += 1;
       renderCard();
+    }
+
+    function deferCurrentRestaurant() {
+      const item = currentRestaurant();
+      if (!item) return;
+      if (!selectedSessionId) {
+        status.textContent = "Create, join, or select a session first.";
+        return;
+      }
+      if ((restaurants.length - index) <= 1) {
+        status.textContent = "No other restaurants left to compare. Choose approve or disapprove.";
+        return;
+      }
+
+      restaurants.splice(index, 1);
+      restaurants.push(item);
+      renderCard();
+      status.textContent = "Moved to the end. You'll see it again later.";
+    }
+
+    function setText(id, value, fallback = "Unavailable") {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const hasValue = value !== null && value !== undefined && String(value).trim() !== "";
+      el.textContent = hasValue ? String(value) : fallback;
+    }
+
+    function setLink(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (value) {
+        el.classList.remove("d-none");
+        el.href = value;
+      } else {
+        el.classList.add("d-none");
+        el.removeAttribute("href");
+      }
+    }
+
+    function setHours(lines) {
+      const list = document.getElementById("modal-hours");
+      if (!list) return;
+      list.innerHTML = "";
+      const items = Array.isArray(lines) ? lines : [];
+      if (!items.length) {
+        const li = document.createElement("li");
+        li.textContent = "Unavailable";
+        list.appendChild(li);
+        return;
+      }
+      items.forEach((line) => {
+        const li = document.createElement("li");
+        li.textContent = line;
+        list.appendChild(li);
+      });
+    }
+
+    async function openDetailsModal() {
+      const item = currentRestaurant();
+      const modal = getDetailsModal();
+      if (!item || !modal) {
+        status.textContent = "Details modal is not available right now.";
+        return;
+      }
+      if (loadingDetails) return;
+      loadingDetails = true;
+      detailsBtn.disabled = true;
+
+      const warningEl = document.getElementById("modal-warning");
+      if (warningEl) {
+        warningEl.textContent = "";
+        warningEl.classList.add("d-none");
+      }
+
+      setText("modal-restaurant-name", item.name, "Restaurant Details");
+      setText("modal-address", item.formatted_address);
+      setText("modal-status", "");
+      setText("modal-rating", item.rating ? `${item.rating}/5` : "N/A", "N/A");
+      setText("modal-ratings-total", item.user_ratings_total, "N/A");
+      setText("modal-price-level", priceLevelToDollars(item.price_level), "N/A");
+      setText("modal-phone", "");
+      setLink("modal-website", "");
+      setLink("modal-map-link", "");
+      setHours([]);
+
+      try {
+        const response = await fetch(`/api/restaurants/${item.id}/details/`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+          const message = data.error || "Unable to load restaurant details.";
+          if (warningEl) {
+            warningEl.textContent = message;
+            warningEl.classList.remove("d-none");
+          }
+        } else {
+          const details = data.details || {};
+          setText("modal-restaurant-name", details.name || item.name, "Restaurant Details");
+          setText("modal-address", details.formatted_address || item.formatted_address);
+          setText("modal-status", details.business_status);
+          setText("modal-rating", details.rating ? `${details.rating}/5` : "N/A", "N/A");
+          setText("modal-ratings-total", details.user_ratings_total, "N/A");
+          setText("modal-price-level", priceLevelToDollars(details.price_level), "N/A");
+          setText(
+            "modal-phone",
+            details.formatted_phone_number || details.international_phone_number
+          );
+          setLink("modal-website", details.website || "");
+          setLink("modal-map-link", details.maps_url || "");
+          setHours(details.weekday_hours || []);
+
+          if (data.warning && warningEl) {
+            warningEl.textContent = data.warning;
+            warningEl.classList.remove("d-none");
+          }
+        }
+      } catch (err) {
+        if (warningEl) {
+          warningEl.textContent = "Unable to load restaurant details.";
+          warningEl.classList.remove("d-none");
+        }
+      } finally {
+        modal.show();
+        loadingDetails = false;
+        detailsBtn.disabled = false;
+      }
     }
 
     function onPointerDown(clientX) {
@@ -278,13 +539,57 @@
 
     approveBtn.addEventListener("click", () => submitDecision("approve"));
     disapproveBtn.addEventListener("click", () => submitDecision("disapprove"));
+    notSureBtn.addEventListener("click", () => deferCurrentRestaurant());
+    detailsBtn.addEventListener("click", () => openDetailsModal());
+    if (searchLocationBtn && locationQueryInput) {
+      searchLocationBtn.addEventListener("click", async () => {
+        const query = locationQueryInput.value.trim();
+        if (!query) {
+          if (locationStatus) locationStatus.textContent = "Enter a ZIP code, city, or address first.";
+          return;
+        }
+        await fetchRestaurantsByLocation({ mode: "query", query: query });
+      });
+    }
+
+    if (deviceLocationBtn) {
+      deviceLocationBtn.addEventListener("click", () => {
+        if (!navigator.geolocation) {
+          if (locationStatus) locationStatus.textContent = "Geolocation is not supported on this device.";
+          return;
+        }
+
+        if (locationStatus) locationStatus.textContent = "Requesting device location permission...";
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            await fetchRestaurantsByLocation({
+              mode: "device",
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude
+            });
+          },
+          (error) => {
+            if (!locationStatus) return;
+            if (error.code === error.PERMISSION_DENIED) {
+              locationStatus.textContent = "Location access was denied. Use ZIP, city, or address instead.";
+              return;
+            }
+            locationStatus.textContent = "Unable to read your current location.";
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000
+          }
+        );
+      });
+    }
 
     renderCard();
   })();
 
   (function () {
     const codeButtons = document.querySelectorAll(".copy-invite-btn");
-    const linkButtons = document.querySelectorAll(".copy-share-link-btn");
+    const linkButtons = document.querySelectorAll(".share-link-btn");
     const buttons = [...codeButtons, ...linkButtons];
     if (!buttons.length) return;
 
@@ -312,9 +617,19 @@
         if (!value) return;
 
         try {
-          await copyText(value);
+          const shouldShare = !code && shareUrl && navigator.share;
+          if (shouldShare) {
+            const sessionName = button.getAttribute("data-session-name") || "ChickenTender Session";
+            await navigator.share({
+              title: `Join ${sessionName}`,
+              text: "Join my ChickenTender session:",
+              url: shareUrl
+            });
+          } else {
+            await copyText(value);
+          }
           const original = button.textContent;
-          button.textContent = "Copied!";
+          button.textContent = shouldShare ? "Shared!" : "Copied!";
           setTimeout(() => {
             button.textContent = original;
           }, 1000);

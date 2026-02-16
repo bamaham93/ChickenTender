@@ -16,7 +16,7 @@
 </div>
 
 <div class="card ct-panel">
-  <div class="card-header">Restaurants Everyone Approved</div>
+  <div class="card-header">Restaurants Ranked By Approvals</div>
   <div class="card-body">
     {% if restaurants %}
     <div class="list-group">
@@ -26,13 +26,13 @@
         class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
       >
         <span>{{ restaurant.name }}</span>
-        <span class="badge text-bg-success">All approved</span>
+        <span class="badge text-bg-success">{{ restaurant.approver_count }} match{{ restaurant.approver_count|pluralize }}</span>
       </a>
       {% endfor %}
     </div>
     {% else %}
     <p class="text-muted mb-0">
-      No restaurant has unanimous approval yet. Keep swiping to find a match.
+      No approvals yet. Keep swiping to build matches.
     </p>
     {% endif %}
   </div>

@@ -9,6 +9,12 @@ def generate_invite_code():
 
 class Restaurant(models.Model):
     name = models.CharField(max_length=255, unique=True)
+    place_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    types = models.JSONField(default=list, blank=True)
+    rating = models.FloatField(null=True, blank=True)
+    user_ratings_total = models.PositiveIntegerField(null=True, blank=True)
+    price_level = models.PositiveSmallIntegerField(null=True, blank=True)
+    business_status = models.CharField(max_length=32, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

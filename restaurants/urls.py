@@ -23,4 +23,14 @@ urlpatterns = [
         views.swipe_restaurant,
         name="swipe_restaurant",
     ),
+    path(
+        "api/restaurants/by-location/",
+        views.search_restaurants_by_location,
+        name="search_restaurants_by_location",
+    ),
+    path(
+        "api/restaurants/<int:restaurant_id>/details/",
+        views.restaurant_api_details,
+        name="restaurant_api_details",
+    ),
 ]

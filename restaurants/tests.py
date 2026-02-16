@@ -1,3 +1,468 @@
-from django.test import TestCase
+from datetime import timedelta
+from io import BytesIO
+import unittest
+from urllib.error import HTTPError
+from urllib.error import URLError
+from unittest.mock import patch
 
-# Create your tests here.
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.test import TestCase
+from django.test import override_settings
+from django.urls import reverse
+from django.utils import timezone
+
+from .models import DiningSession, Restaurant, SessionParticipant
+
+
+class SessionVisibilityTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.alice = user_model.objects.create_user(
+            username="alice", password="test-pass-123"
+        )
+        self.bob = user_model.objects.create_user(
+            username="bob", password="test-pass-123"
+        )
+
+        base_time = timezone.now() + timedelta(days=1)
+
+        self.alice_created_session = DiningSession.objects.create(
+            name="Alice Created",
+            proposed_time=base_time,
+            created_by=self.alice,
+        )
+        SessionParticipant.objects.create(
+            session=self.alice_created_session,
+            user=self.alice,
+        )
+
+        self.invited_session = DiningSession.objects.create(
+            name="Invited Session",
+            proposed_time=base_time + timedelta(hours=1),
+            created_by=self.bob,
+        )
+        SessionParticipant.objects.create(session=self.invited_session, user=self.bob)
+        SessionParticipant.objects.create(session=self.invited_session, user=self.alice)
+
+        self.hidden_session = DiningSession.objects.create(
+            name="Hidden Session",
+            proposed_time=base_time + timedelta(hours=2),
+            created_by=self.bob,
+        )
+        SessionParticipant.objects.create(session=self.hidden_session, user=self.bob)
+
+        self.restaurant = Restaurant.objects.create(name="Test Chicken Place")
+
+    def test_index_shows_only_created_or_joined_sessions(self):
+        self.client.login(username="alice", password="test-pass-123")
+
+        response = self.client.get(reverse("restaurants:index"))
+
+        self.assertEqual(response.status_code, 200)
+        visible_ids = {row["id"] for row in response.context["sessions"]}
+        created_ids = {row["id"] for row in response.context["created_sessions"]}
+
+        self.assertIn(self.alice_created_session.id, visible_ids)
+        self.assertIn(self.invited_session.id, visible_ids)
+        self.assertNotIn(self.hidden_session.id, visible_ids)
+
+        self.assertIn(self.alice_created_session.id, created_ids)
+        self.assertNotIn(self.invited_session.id, created_ids)
+        self.assertNotIn(self.hidden_session.id, created_ids)
+
+    def test_non_participant_cannot_access_session_results(self):
+        self.client.login(username="alice", password="test-pass-123")
+
+        response = self.client.get(
+            reverse("restaurants:session_results", args=[self.hidden_session.id])
+        )
+
+        self.assertRedirects(response, reverse("restaurants:index"))
+
+    def test_non_participant_cannot_access_restaurant_detail(self):
+        self.client.login(username="alice", password="test-pass-123")
+
+        response = self.client.get(
+            reverse(
+                "restaurants:restaurant_detail",
+                args=[self.hidden_session.id, self.restaurant.id],
+            )
+        )
+
+        self.assertRedirects(response, reverse("restaurants:index"))
+
+
+@override_settings(GOOGLE_MAPS_API_KEY="test-google-api-key")
+class LocationRestaurantSearchTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="location-user", password="test-pass-123"
+        )
+        self.client.login(username="location-user", password="test-pass-123")
+
+    def test_index_clear_location_query_param_resets_location_session_state(self):
+        session = self.client.session
+        session["location_restaurant_ids"] = [1, 2, 3]
+        session["location_label"] = "60614"
+        session["location_restaurant_addresses"] = {"1": "123 Main St"}
+        session.save()
+
+        response = self.client.get(reverse("restaurants:index"), {"clear_location": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["location_label"], "")
+        updated = self.client.session
+        self.assertNotIn("location_restaurant_ids", updated)
+        self.assertNotIn("location_label", updated)
+        self.assertNotIn("location_restaurant_addresses", updated)
+
+    @patch("restaurants.views._search_google_places_restaurants")
+    def test_text_location_search_returns_restaurants(self, places_mock):
+        places_mock.return_value = [
+            {
+                "name": "Chicken Planet",
+                "formatted_address": "100 Main St, Chicago, IL",
+                "place_id": "abc123",
+                "types": ["restaurant", "food", "point_of_interest"],
+                "rating": 4.6,
+                "user_ratings_total": 812,
+                "price_level": 2,
+                "business_status": "OPERATIONAL",
+            },
+            {
+                "name": "Wing City",
+                "formatted_address": "200 State St, Chicago, IL",
+                "place_id": "xyz789",
+                "types": ["restaurant", "meal_takeaway"],
+                "rating": 4.2,
+                "user_ratings_total": 103,
+                "price_level": 1,
+                "business_status": "OPERATIONAL",
+            },
+        ]
+
+        response = self.client.post(
+            reverse("restaurants:search_restaurants_by_location"),
+            data={
+                "mode": "query",
+                "query": "Chicago",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["location_label"], "Chicago")
+        self.assertEqual(len(payload["restaurants"]), 2)
+        self.assertEqual(
+            sorted([row["name"] for row in payload["restaurants"]]),
+            ["Chicken Planet", "Wing City"],
+        )
+        self.assertIn("formatted_address", payload["restaurants"][0])
+        saved = Restaurant.objects.get(name="Chicken Planet")
+        self.assertEqual(saved.place_id, "abc123")
+        self.assertEqual(saved.types, ["restaurant", "food", "point_of_interest"])
+        self.assertEqual(saved.rating, 4.6)
+        self.assertEqual(saved.user_ratings_total, 812)
+        self.assertEqual(saved.price_level, 2)
+        self.assertEqual(saved.business_status, "OPERATIONAL")
+        places_mock.assert_called_once_with(
+            "restaurants in Chicago",
+            latitude=None,
+            longitude=None,
+        )
+
+    @patch("restaurants.views._search_google_places_restaurants")
+    def test_device_location_search_with_invalid_coordinates_fails(self, places_mock):
+        response = self.client.post(
+            reverse("restaurants:search_restaurants_by_location"),
+            data={
+                "mode": "device",
+                "latitude": 200,
+                "longitude": -87.62,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("out of range", response.json()["error"])
+        places_mock.assert_not_called()
+
+    def test_location_search_requires_valid_mode(self):
+        response = self.client.post(
+            reverse("restaurants:search_restaurants_by_location"),
+            data={"mode": "something-else"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Mode must be query or device.")
+
+    @patch("restaurants.views._search_google_places_restaurants")
+    def test_location_search_surfaces_upstream_error_reason(self, places_mock):
+        places_mock.side_effect = URLError("403 Forbidden")
+
+        response = self.client.post(
+            reverse("restaurants:search_restaurants_by_location"),
+            data={
+                "mode": "query",
+                "query": "Chicago",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("403 Forbidden", response.json()["error"])
+
+    @patch("restaurants.views._search_google_places_restaurants")
+    def test_location_search_with_no_results_clears_persisted_location_state(self, places_mock):
+        places_mock.return_value = []
+
+        session = self.client.session
+        session["location_restaurant_ids"] = [9]
+        session["location_label"] = "Old ZIP"
+        session["location_restaurant_addresses"] = {"9": "Old Address"}
+        session.save()
+
+        response = self.client.post(
+            reverse("restaurants:search_restaurants_by_location"),
+            data={
+                "mode": "query",
+                "query": "Nowhere",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["restaurants"], [])
+
+        updated = self.client.session
+        self.assertNotIn("location_restaurant_ids", updated)
+        self.assertNotIn("location_label", updated)
+        self.assertNotIn("location_restaurant_addresses", updated)
+
+    def test_location_search_requires_authentication(self):
+        self.client.logout()
+        response = self.client.post(
+            reverse("restaurants:search_restaurants_by_location"),
+            data={"mode": "query", "query": "Chicago"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "Authentication required.")
+
+    @patch("restaurants.views._search_google_places_restaurants")
+    def test_location_search_rate_limited_per_user(self, places_mock):
+        places_mock.return_value = []
+
+        first = self.client.post(
+            reverse("restaurants:search_restaurants_by_location"),
+            data={"mode": "query", "query": "Chicago"},
+            content_type="application/json",
+        )
+        second = self.client.post(
+            reverse("restaurants:search_restaurants_by_location"),
+            data={"mode": "query", "query": "Chicago"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertIn("retry_after", second.json())
+
+    @patch("restaurants.views._fetch_json")
+    @unittest.skip("Places API (New) path is intentionally disabled for now.")
+    def test_google_places_new_permission_denied_falls_back_to_legacy(self, fetch_json_mock):
+        from restaurants.views import _search_google_places_restaurants
+
+        denied_payload = (
+            b'{"error":{"status":"PERMISSION_DENIED",'
+            b'"message":"Requests to this API places.googleapis.com method '
+            b'google.maps.places.v1.Places.SearchText are blocked."}}'
+        )
+        fetch_json_mock.side_effect = [
+            HTTPError(
+                url="https://places.googleapis.com/v1/places:searchText",
+                code=403,
+                msg="Forbidden",
+                hdrs=None,
+                fp=BytesIO(denied_payload),
+            ),
+            {
+                "status": "OK",
+                "results": [
+                    {
+                        "name": "Fallback Chicken",
+                        "formatted_address": "123 Legacy Ln",
+                    }
+                ],
+            },
+        ]
+
+        places = _search_google_places_restaurants("restaurants in Chicago")
+        self.assertEqual(
+            places,
+            [{"name": "Fallback Chicken", "formatted_address": "123 Legacy Ln"}],
+        )
+
+
+@override_settings(GOOGLE_MAPS_API_KEY="test-google-api-key")
+class RestaurantPlaceDetailsTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="detail-user", password="test-pass-123"
+        )
+        self.session = DiningSession.objects.create(
+            name="Detail Session",
+            proposed_time=timezone.now() + timedelta(days=1),
+            created_by=self.user,
+        )
+        SessionParticipant.objects.create(session=self.session, user=self.user)
+        self.restaurant = Restaurant.objects.create(
+            name="Place Detail Chicken",
+            place_id="abc-place-id-123",
+        )
+
+    @patch("restaurants.views._fetch_google_place_details_legacy")
+    def test_restaurant_detail_fetches_place_details_when_place_id_exists(self, details_mock):
+        details_mock.return_value = {
+            "name": "Place Detail Chicken",
+            "place_id": "abc-place-id-123",
+            "formatted_address": "123 Main St",
+            "rating": 4.8,
+            "user_ratings_total": 90,
+            "price_level": 2,
+            "business_status": "OPERATIONAL",
+            "types": ["restaurant"],
+            "formatted_phone_number": "(555) 111-2222",
+            "international_phone_number": "+1 555-111-2222",
+            "website": "https://example.com",
+            "maps_url": "https://maps.google.com/?cid=123",
+            "weekday_hours": ["Monday: 9:00 AM - 9:00 PM"],
+            "latitude": 41.88,
+            "longitude": -87.63,
+        }
+
+        self.client.login(username="detail-user", password="test-pass-123")
+        response = self.client.get(
+            reverse(
+                "restaurants:restaurant_detail",
+                args=[self.session.id, self.restaurant.id],
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        details_mock.assert_called_once_with("abc-place-id-123")
+        self.assertEqual(response.context["place_details"]["place_id"], "abc-place-id-123")
+        self.assertEqual(response.context["place_details_error"], "")
+
+    @patch("restaurants.views._fetch_google_place_details_legacy")
+    def test_restaurant_detail_shows_nonfatal_error_when_place_details_lookup_fails(self, details_mock):
+        details_mock.side_effect = URLError("upstream timeout")
+
+        self.client.login(username="detail-user", password="test-pass-123")
+        response = self.client.get(
+            reverse(
+                "restaurants:restaurant_detail",
+                args=[self.session.id, self.restaurant.id],
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["place_details"]["place_id"], "abc-place-id-123")
+        self.assertIn("upstream timeout", response.context["place_details_error"])
+
+    @patch("restaurants.views._fetch_google_place_details_legacy")
+    def test_restaurant_api_details_returns_live_details(self, details_mock):
+        details_mock.return_value = {
+            "name": "Place Detail Chicken",
+            "place_id": "abc-place-id-123",
+            "formatted_address": "123 Main St",
+            "rating": 4.8,
+            "user_ratings_total": 90,
+            "price_level": 2,
+            "business_status": "OPERATIONAL",
+            "types": ["restaurant"],
+            "formatted_phone_number": "(555) 111-2222",
+            "international_phone_number": "+1 555-111-2222",
+            "website": "https://example.com",
+            "maps_url": "https://maps.google.com/?cid=123",
+            "weekday_hours": ["Monday: 9:00 AM - 9:00 PM"],
+            "latitude": 41.88,
+            "longitude": -87.63,
+        }
+
+        self.client.login(username="detail-user", password="test-pass-123")
+        response = self.client.get(
+            reverse("restaurants:restaurant_api_details", args=[self.restaurant.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["details"]["place_id"], "abc-place-id-123")
+        self.assertEqual(payload["restaurant"]["rating"], 4.8)
+        self.assertEqual(payload["warning"], "")
+        details_mock.assert_called_once_with("abc-place-id-123")
+
+    @patch("restaurants.views._fetch_google_place_details_legacy")
+    def test_restaurant_api_details_returns_warning_on_lookup_failure(self, details_mock):
+        details_mock.side_effect = URLError("upstream timeout")
+
+        self.client.login(username="detail-user", password="test-pass-123")
+        response = self.client.get(
+            reverse("restaurants:restaurant_api_details", args=[self.restaurant.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["details"]["place_id"], "abc-place-id-123")
+        self.assertIn("upstream timeout", payload["warning"])
+
+    def test_restaurant_api_details_requires_authentication(self):
+        response = self.client.get(
+            reverse("restaurants:restaurant_api_details", args=[self.restaurant.id])
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "Authentication required.")
+
+    @patch("restaurants.views._fetch_google_place_details_legacy")
+    def test_restaurant_api_details_rate_limited_per_user(self, details_mock):
+        details_mock.return_value = {
+            "name": "Place Detail Chicken",
+            "place_id": "abc-place-id-123",
+            "formatted_address": "123 Main St",
+            "rating": 4.8,
+            "user_ratings_total": 90,
+            "price_level": 2,
+            "business_status": "OPERATIONAL",
+            "types": ["restaurant"],
+            "formatted_phone_number": "(555) 111-2222",
+            "international_phone_number": "+1 555-111-2222",
+            "website": "https://example.com",
+            "maps_url": "https://maps.google.com/?cid=123",
+            "weekday_hours": ["Monday: 9:00 AM - 9:00 PM"],
+            "latitude": 41.88,
+            "longitude": -87.63,
+        }
+        self.client.login(username="detail-user", password="test-pass-123")
+
+        first = self.client.get(
+            reverse("restaurants:restaurant_api_details", args=[self.restaurant.id])
+        )
+        second = self.client.get(
+            reverse("restaurants:restaurant_api_details", args=[self.restaurant.id])
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertIn("retry_after", second.json())
