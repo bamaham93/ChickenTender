@@ -97,6 +97,53 @@ class SessionVisibilityTests(TestCase):
         response = self.client.get(reverse("restaurants:index"))
         self.assertRedirects(response, "/accounts/login/?next=/")
 
+    def test_session_results_requires_authentication(self):
+        response = self.client.get(
+            reverse("restaurants:session_results", args=[self.alice_created_session.id])
+        )
+        self.assertRedirects(
+            response,
+            f"/accounts/login/?next=/sessions/{self.alice_created_session.id}/results/",
+        )
+
+    def test_restaurant_detail_requires_authentication(self):
+        response = self.client.get(
+            reverse(
+                "restaurants:restaurant_detail",
+                args=[self.alice_created_session.id, self.restaurant.id],
+            )
+        )
+        self.assertRedirects(
+            response,
+            f"/accounts/login/?next=/sessions/{self.alice_created_session.id}/restaurants/{self.restaurant.id}/",
+        )
+
+    def test_create_session_requires_authentication(self):
+        response = self.client.post(
+            reverse("restaurants:create_session"),
+            data={"name": "Blocked"},
+        )
+        self.assertRedirects(response, "/accounts/login/?next=/")
+
+    def test_join_session_requires_authentication(self):
+        response = self.client.post(
+            reverse("restaurants:join_session"),
+            data={"invite_code": self.alice_created_session.invite_code},
+        )
+        self.assertRedirects(response, "/accounts/login/?next=/")
+
+    def test_swipe_restaurant_requires_authentication(self):
+        response = self.client.post(
+            reverse(
+                "restaurants:swipe_restaurant",
+                args=[self.alice_created_session.id, self.restaurant.id],
+            ),
+            data={"decision": "approve"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "Authentication required.")
+
 
 @override_settings(GOOGLE_MAPS_API_KEY="test-google-api-key")
 class LocationRestaurantSearchTests(TestCase):
