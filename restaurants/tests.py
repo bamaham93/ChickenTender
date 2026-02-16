@@ -93,6 +93,10 @@ class SessionVisibilityTests(TestCase):
 
         self.assertRedirects(response, reverse("restaurants:index"))
 
+    def test_index_requires_authentication(self):
+        response = self.client.get(reverse("restaurants:index"))
+        self.assertRedirects(response, "/accounts/login/?next=/")
+
 
 @override_settings(GOOGLE_MAPS_API_KEY="test-google-api-key")
 class LocationRestaurantSearchTests(TestCase):

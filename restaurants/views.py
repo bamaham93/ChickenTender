@@ -311,6 +311,10 @@ def _save_restaurants_to_db(places):
 
 
 def index(request):
+    if not request.user.is_authenticated:
+        next_url = quote(request.get_full_path(), safe="/?=&")
+        return redirect(f"/accounts/login/?next={next_url}")
+
     starter_restaurants = ["Chick-fil-A", "Raising Cane's", "Popeyes"]
     for name in starter_restaurants:
         Restaurant.objects.get_or_create(name=name)
@@ -332,48 +336,43 @@ def index(request):
         restaurants_query = Restaurant.objects.filter(name__in=starter_restaurants)
     invite_code = request.GET.get("invite", "").strip()
 
-    if invite_code and not request.user.is_authenticated:
-        next_url = quote(request.get_full_path(), safe="/?=&")
-        return redirect(f"/accounts/login/?next={next_url}")
-
-    if request.user.is_authenticated:
-        invited_session = None
-        if invite_code:
-            invited_session = DiningSession.objects.filter(invite_code=invite_code).first()
-            if invited_session:
-                SessionParticipant.objects.get_or_create(
-                    session=invited_session,
-                    user=request.user,
-                )
-
-        user_sessions = DiningSession.objects.filter(participants=request.user).distinct()
-        sessions = list(
-            user_sessions.values("id", "name", "proposed_time", "invite_code")
-        )
-        created_sessions = list(
-            DiningSession.objects.filter(created_by=request.user).values(
-                "id", "name", "proposed_time", "invite_code"
-            )
-        )
-        for session in created_sessions:
-            session["share_url"] = request.build_absolute_uri(
-                f"/?invite={session['invite_code']}"
-            )
-
-        session_id = request.GET.get("session")
-        if session_id:
-            selected_session = user_sessions.filter(id=session_id).first()
-        if not selected_session and invited_session:
-            selected_session = user_sessions.filter(id=invited_session.id).first()
-        if not selected_session:
-            selected_session = user_sessions.first()
-
-        if selected_session:
-            swiped_restaurant_ids = SwipeDecision.objects.filter(
-                session=selected_session,
+    invited_session = None
+    if invite_code:
+        invited_session = DiningSession.objects.filter(invite_code=invite_code).first()
+        if invited_session:
+            SessionParticipant.objects.get_or_create(
+                session=invited_session,
                 user=request.user,
-            ).values_list("restaurant_id", flat=True)
-            restaurants_query = restaurants_query.exclude(id__in=swiped_restaurant_ids)
+            )
+
+    user_sessions = DiningSession.objects.filter(participants=request.user).distinct()
+    sessions = list(
+        user_sessions.values("id", "name", "proposed_time", "invite_code")
+    )
+    created_sessions = list(
+        DiningSession.objects.filter(created_by=request.user).values(
+            "id", "name", "proposed_time", "invite_code"
+        )
+    )
+    for session in created_sessions:
+        session["share_url"] = request.build_absolute_uri(
+            f"/?invite={session['invite_code']}"
+        )
+
+    session_id = request.GET.get("session")
+    if session_id:
+        selected_session = user_sessions.filter(id=session_id).first()
+    if not selected_session and invited_session:
+        selected_session = user_sessions.filter(id=invited_session.id).first()
+    if not selected_session:
+        selected_session = user_sessions.first()
+
+    if selected_session:
+        swiped_restaurant_ids = SwipeDecision.objects.filter(
+            session=selected_session,
+            user=request.user,
+        ).values_list("restaurant_id", flat=True)
+        restaurants_query = restaurants_query.exclude(id__in=swiped_restaurant_ids)
 
     restaurants = list(
         restaurants_query.values(
