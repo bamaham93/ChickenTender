@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+
+{% block title %}Restaurant Detail | ChickenTender{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">{{ restaurant.name }}</h1>
+    <p class="text-muted mb-0">Session: <strong>{{ session.name }}</strong></p>
+  </div>
+  <a href="{% url 'restaurants:session_results' session.id %}" class="btn btn-outline-secondary">
+    Back To Matches
+  </a>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-4">
+    <div class="card ct-panel text-center">
+      <div class="card-body">
+        <div class="small text-muted">Approve</div>
+        <div class="h4 mb-0">{{ approve_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-4">
+    <div class="card ct-panel text-center">
+      <div class="card-body">
+        <div class="small text-muted">Disapprove</div>
+        <div class="h4 mb-0">{{ disapprove_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-4">
+    <div class="card ct-panel text-center">
+      <div class="card-body">
+        <div class="small text-muted">Pending</div>
+        <div class="h4 mb-0">{{ pending_count }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card ct-panel">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Participant Decisions</span>
+    {% if all_approved %}
+    <span class="badge text-bg-success">Unanimous Approval</span>
+    {% else %}
+    <span class="badge text-bg-secondary">Not Unanimous</span>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Decision</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in participant_rows %}
+          <tr>
+            <td>{{ row.username }}</td>
+            <td>
+              {% if row.decision == "approve" %}
+              <span class="badge text-bg-success">Approve</span>
+              {% elif row.decision == "disapprove" %}
+              <span class="badge text-bg-danger">Disapprove</span>
+              {% else %}
+              <span class="badge text-bg-secondary">Pending</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

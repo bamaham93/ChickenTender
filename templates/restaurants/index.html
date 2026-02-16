@@ -1,0 +1,328 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard | ChickenTender{% endblock %}
+
+{% block content %}
+{{ restaurants|json_script:"restaurants-data" }}
+
+<div class="mb-3">
+  <h1 class="h3 mb-1">Pick Tonight's Spot</h1>
+  <p class="text-muted mb-0">Swipe right to approve, left to pass.</p>
+</div>
+
+<div class="card ct-panel mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Swipe</span>
+    <div class="d-flex align-items-center gap-2">
+      {% if selected_session %}
+      <a
+        href="{% url 'restaurants:session_results' selected_session.id %}"
+        class="btn btn-sm btn-outline-primary"
+      >
+        View Matches
+      </a>
+      <span class="badge text-bg-success">{{ selected_session.name }}</span>
+      {% else %}
+      <span class="badge text-bg-secondary">No session selected</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-body">
+    {% if user.is_authenticated and selected_session %}
+    <p class="small text-muted mb-2">Invite code: <code>{{ selected_session.invite_code }}</code></p>
+    {% endif %}
+    <div id="swipe-app" style="max-width: 460px;">
+      <div id="status" class="small text-muted mb-2"></div>
+      <div id="card" class="card shadow-sm" style="touch-action: pan-y; user-select: none;">
+        <div class="card-body">
+          <h3 class="h5 card-title" id="card-title"></h3>
+          <p class="card-text mb-0">Drag left or right, or use buttons.</p>
+        </div>
+      </div>
+      <div class="d-grid gap-2 d-sm-flex mt-3">
+        <button id="disapprove-btn" class="btn btn-outline-danger flex-fill">Disapprove</button>
+        <button id="approve-btn" class="btn btn-success flex-fill">Approve</button>
+      </div>
+    </div>
+    {% if not user.is_authenticated %}
+    <div class="alert alert-info mt-3 mb-0">
+      Sign in to join a session and save swipes.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if user.is_authenticated %}
+<div class="card ct-panel mb-4">
+  <div class="card-header">Session Management</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-12 col-md-4">
+        <form method="post" action="{% url 'restaurants:create_session' %}">
+          {% csrf_token %}
+          <h2 class="h6">Create Session</h2>
+          <label class="form-label" for="session-name">Name</label>
+          <input id="session-name" name="name" class="form-control mb-2" placeholder="Tonight dinner" />
+          <label class="form-label" for="session-time">Proposed time</label>
+          <input id="session-time" type="datetime-local" name="proposed_time" class="form-control mb-3" />
+          <button type="submit" class="btn btn-primary w-100">Create</button>
+        </form>
+      </div>
+
+      <div class="col-12 col-md-4">
+        <form method="post" action="{% url 'restaurants:join_session' %}">
+          {% csrf_token %}
+          <h2 class="h6">Join Session</h2>
+          <label class="form-label" for="invite-code">Invite code</label>
+          <input id="invite-code" name="invite_code" class="form-control mb-3" placeholder="Paste invite code" />
+          <button type="submit" class="btn btn-outline-primary w-100">Join</button>
+        </form>
+      </div>
+
+      <div class="col-12 col-md-4">
+        <form method="get" action="{% url 'restaurants:index' %}">
+          <h2 class="h6">Select Active Session</h2>
+          <label class="form-label" for="session-id">Session</label>
+          <select id="session-id" name="session" class="form-select mb-2" {% if not sessions %}disabled{% endif %}>
+            {% for session in sessions %}
+            <option value="{{ session.id }}" {% if selected_session and session.id == selected_session.id %}selected{% endif %}>
+              {{ session.name }} ({{ session.proposed_time }})
+            </option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-outline-secondary w-100" {% if not sessions %}disabled{% endif %}>Load Session</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card ct-panel">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Sessions You Created</span>
+    <span class="badge text-bg-light">{{ created_sessions|length }}</span>
+  </div>
+  <div class="card-body">
+    {% if created_sessions %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Session</th>
+            <th>Time</th>
+            <th>Invite</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for session in created_sessions %}
+          <tr>
+            <td>{{ session.name }}</td>
+            <td>{{ session.proposed_time }}</td>
+            <td><code>{{ session.invite_code }}</code></td>
+            <td class="d-flex gap-2">
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary copy-invite-btn"
+                data-invite-code="{{ session.invite_code }}"
+              >
+                Copy Code
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-primary copy-share-link-btn"
+                data-share-url="{{ session.share_url }}"
+              >
+                Copy Link
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">You have not created any sessions yet.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<script>
+  (function () {
+    const restaurants = JSON.parse(document.getElementById("restaurants-data").textContent);
+    const selectedSessionId = "{{ selected_session.id|default:'' }}";
+    const card = document.getElementById("card");
+    const cardTitle = document.getElementById("card-title");
+    const status = document.getElementById("status");
+    const approveBtn = document.getElementById("approve-btn");
+    const disapproveBtn = document.getElementById("disapprove-btn");
+
+    if (!card || !cardTitle || !status || !approveBtn || !disapproveBtn) return;
+
+    let index = 0;
+    let startX = 0;
+    let dragging = false;
+
+    function currentRestaurant() {
+      return restaurants[index] || null;
+    }
+
+    function renderCard() {
+      if (!selectedSessionId) {
+        card.classList.add("d-none");
+        approveBtn.disabled = true;
+        disapproveBtn.disabled = true;
+        status.textContent = "Select or join a session to start swiping.";
+        return;
+      }
+
+      const item = currentRestaurant();
+      if (!item) {
+        card.classList.add("d-none");
+        approveBtn.disabled = true;
+        disapproveBtn.disabled = true;
+        status.textContent = "No more restaurants to swipe in this session.";
+        return;
+      }
+
+      card.classList.remove("d-none");
+      approveBtn.disabled = false;
+      disapproveBtn.disabled = false;
+      card.style.transform = "translateX(0px) rotate(0deg)";
+      cardTitle.textContent = item.name;
+      status.textContent = "Restaurant " + (index + 1) + " of " + restaurants.length;
+    }
+
+    function getCsrfToken() {
+      const name = "csrftoken=";
+      const decodedCookie = decodeURIComponent(document.cookie);
+      const parts = decodedCookie.split(";");
+      for (let i = 0; i < parts.length; i++) {
+        const c = parts[i].trim();
+        if (c.startsWith(name)) {
+          return c.substring(name.length, c.length);
+        }
+      }
+      return "";
+    }
+
+    async function submitDecision(decision) {
+      const item = currentRestaurant();
+      if (!item) return;
+      if (!selectedSessionId) {
+        status.textContent = "Create, join, or select a session first.";
+        return;
+      }
+
+      const response = await fetch(`/api/sessions/${selectedSessionId}/restaurants/${item.id}/swipe/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCsrfToken()
+        },
+        body: JSON.stringify({ decision: decision })
+      });
+
+      if (response.status === 401) {
+        window.location.href = "/accounts/login/?next=/";
+        return;
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        status.textContent = errorData.error || "Unable to save your swipe.";
+        return;
+      }
+
+      index += 1;
+      renderCard();
+    }
+
+    function onPointerDown(clientX) {
+      dragging = true;
+      startX = clientX;
+    }
+
+    function onPointerMove(clientX) {
+      if (!dragging) return;
+      const delta = clientX - startX;
+      const rotate = delta / 20;
+      card.style.transform = `translateX(${delta}px) rotate(${rotate}deg)`;
+    }
+
+    function onPointerUp(clientX) {
+      if (!dragging) return;
+      dragging = false;
+      const delta = clientX - startX;
+      const threshold = 100;
+      if (delta > threshold) {
+        submitDecision("approve");
+      } else if (delta < -threshold) {
+        submitDecision("disapprove");
+      } else {
+        card.style.transform = "translateX(0px) rotate(0deg)";
+      }
+    }
+
+    card.addEventListener("mousedown", (e) => onPointerDown(e.clientX));
+    window.addEventListener("mousemove", (e) => onPointerMove(e.clientX));
+    window.addEventListener("mouseup", (e) => onPointerUp(e.clientX));
+
+    card.addEventListener("touchstart", (e) => onPointerDown(e.touches[0].clientX), { passive: true });
+    card.addEventListener("touchmove", (e) => onPointerMove(e.touches[0].clientX), { passive: true });
+    card.addEventListener("touchend", (e) => {
+      const changed = e.changedTouches[0];
+      onPointerUp(changed.clientX);
+    });
+
+    approveBtn.addEventListener("click", () => submitDecision("approve"));
+    disapproveBtn.addEventListener("click", () => submitDecision("disapprove"));
+
+    renderCard();
+  })();
+
+  (function () {
+    const codeButtons = document.querySelectorAll(".copy-invite-btn");
+    const linkButtons = document.querySelectorAll(".copy-share-link-btn");
+    const buttons = [...codeButtons, ...linkButtons];
+    if (!buttons.length) return;
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const temp = document.createElement("textarea");
+      temp.value = text;
+      temp.setAttribute("readonly", "");
+      temp.style.position = "absolute";
+      temp.style.left = "-9999px";
+      document.body.appendChild(temp);
+      temp.select();
+      document.execCommand("copy");
+      document.body.removeChild(temp);
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", async () => {
+        const code = button.getAttribute("data-invite-code");
+        const shareUrl = button.getAttribute("data-share-url");
+        const value = code || shareUrl;
+        if (!value) return;
+
+        try {
+          await copyText(value);
+          const original = button.textContent;
+          button.textContent = "Copied!";
+          setTimeout(() => {
+            button.textContent = original;
+          }, 1000);
+        } catch (e) {
+          button.textContent = "Failed";
+        }
+      });
+    });
+  })();
+</script>
+{% endblock %}
