@@ -1,17 +1,32 @@
 from datetime import timedelta
 from io import BytesIO
+import os
 import unittest
 from urllib.error import HTTPError
 from urllib.error import URLError
 from unittest.mock import patch
 
+import django
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase
 from django.test import override_settings
+from django.test.utils import setup_test_environment
 from django.urls import reverse
 from django.utils import timezone
+
+# Allow VS Code unittest discovery to import Django tests directly.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "chickentender.settings")
+django.setup()
+if "testserver" not in settings.ALLOWED_HOSTS:
+    settings.ALLOWED_HOSTS = [*settings.ALLOWED_HOSTS, "testserver"]
+try:
+    setup_test_environment()
+except RuntimeError:
+    # Django's test runner already initialized the test environment.
+    pass
 
 from .models import DiningSession, Restaurant, SessionParticipant, SwipeDecision
 
