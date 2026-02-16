@@ -10,8 +10,13 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load environment variables before any settings read os.environ values.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 
@@ -29,7 +34,7 @@ SECRET_KEY = 'django-insecure-d@y=2-=p9fvedvp-qvvuo^3&q59lwu4xy$bl7v148b8kyhr0ma
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ["bamaham93.pythonanywhere.com",]
+ALLOWED_HOSTS = ["bamaham93.pythonanywhere.com"]
 
 
 # Application definition
