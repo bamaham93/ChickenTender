@@ -46,14 +46,5 @@ jobs:
           HOST="${PA_HOST:-ssh.pythonanywhere.com}"
           ssh-keyscan -H "${HOST}" >> ~/.ssh/known_hosts
 
-      - name: Deploy on PythonAnywhere
-        env:
-          PA_USERNAME: ${{ secrets.PA_USERNAME }}
-          PA_HOST: ${{ secrets.PA_HOST }}
-        run: |
-          set -euo pipefail
-          HOST="${PA_HOST:-ssh.pythonanywhere.com}"
-          sed -i 's/\r$//' ~/.ssh/id_ed25519
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -i ~/.ssh/id_ed25519 \
-            "${PA_USERNAME}@${HOST}" "cd ~/ChickenTender && ./deploy.sh"
+      
 
