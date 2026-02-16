@@ -7,12 +7,13 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import DiningSession, Restaurant, SessionParticipant
+from .models import DiningSession, Restaurant, SessionParticipant, SwipeDecision
 
 
 class SessionVisibilityTests(TestCase):
@@ -466,3 +467,69 @@ class RestaurantPlaceDetailsTests(TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 429)
         self.assertIn("retry_after", second.json())
+
+
+class CleanupOldDataCommandTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="cleanup-user", password="test-pass-123"
+        )
+        now = timezone.now()
+        old_time = now - timedelta(days=90)
+        recent_time = now - timedelta(days=10)
+
+        self.old_session = DiningSession.objects.create(
+            name="Old Session",
+            proposed_time=old_time,
+            created_by=self.user,
+        )
+        self.recent_session = DiningSession.objects.create(
+            name="Recent Session",
+            proposed_time=recent_time,
+            created_by=self.user,
+        )
+        DiningSession.objects.filter(id=self.old_session.id).update(created_at=old_time)
+        DiningSession.objects.filter(id=self.recent_session.id).update(created_at=recent_time)
+        self.old_session.refresh_from_db()
+        self.recent_session.refresh_from_db()
+
+        self.old_restaurant = Restaurant.objects.create(name="Old Restaurant")
+        self.recent_restaurant = Restaurant.objects.create(name="Recent Restaurant")
+        Restaurant.objects.filter(id=self.old_restaurant.id).update(created_at=old_time)
+        Restaurant.objects.filter(id=self.recent_restaurant.id).update(created_at=recent_time)
+        self.old_restaurant.refresh_from_db()
+        self.recent_restaurant.refresh_from_db()
+
+        self.old_decision = SwipeDecision.objects.create(
+            session=self.old_session,
+            user=self.user,
+            restaurant=self.recent_restaurant,
+            decision=SwipeDecision.APPROVE,
+        )
+        self.recent_decision = SwipeDecision.objects.create(
+            session=self.recent_session,
+            user=self.user,
+            restaurant=self.recent_restaurant,
+            decision=SwipeDecision.DISAPPROVE,
+        )
+        SwipeDecision.objects.filter(id=self.old_decision.id).update(updated_at=old_time)
+        SwipeDecision.objects.filter(id=self.recent_decision.id).update(updated_at=recent_time)
+
+    def test_cleanup_old_data_dry_run_does_not_delete_records(self):
+        call_command("cleanup_old_data", "--days", "60", "--dry-run")
+
+        self.assertTrue(DiningSession.objects.filter(id=self.old_session.id).exists())
+        self.assertTrue(Restaurant.objects.filter(id=self.old_restaurant.id).exists())
+        self.assertTrue(SwipeDecision.objects.filter(id=self.old_decision.id).exists())
+
+    def test_cleanup_old_data_deletes_only_records_older_than_cutoff(self):
+        call_command("cleanup_old_data", "--days", "60")
+
+        self.assertFalse(DiningSession.objects.filter(id=self.old_session.id).exists())
+        self.assertFalse(Restaurant.objects.filter(id=self.old_restaurant.id).exists())
+        self.assertFalse(SwipeDecision.objects.filter(id=self.old_decision.id).exists())
+
+        self.assertTrue(DiningSession.objects.filter(id=self.recent_session.id).exists())
+        self.assertTrue(Restaurant.objects.filter(id=self.recent_restaurant.id).exists())
+        self.assertTrue(SwipeDecision.objects.filter(id=self.recent_decision.id).exists())
