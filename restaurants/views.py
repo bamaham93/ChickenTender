@@ -20,14 +20,26 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import DiningSession, Restaurant, SessionParticipant, SwipeDecision
-from .GoogleMapsApi import _fetch_json, _rate_limit_retry_after, _search_google_places_restaurants, _fetch_google_place_details_legacy, _extract_google_error_message, _save_restaurants_to_db, _get_google_maps_api_key
+from .GoogleMapsApi import (
+    _fetch_json,
+    _rate_limit_retry_after,
+    _search_google_places_restaurants,
+    _fetch_google_place_details_legacy,
+    _extract_google_error_message,
+    _save_restaurants_to_db,
+    _get_google_maps_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
 
 GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
-GOOGLE_PLACES_TEXT_SEARCH_LEGACY_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-GOOGLE_PLACE_DETAILS_LEGACY_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+GOOGLE_PLACES_TEXT_SEARCH_LEGACY_URL = (
+    "https://maps.googleapis.com/maps/api/place/textsearch/json"
+)
+GOOGLE_PLACE_DETAILS_LEGACY_URL = (
+    "https://maps.googleapis.com/maps/api/place/details/json"
+)
 GOOGLE_PLACES_FIELD_MASK = "places.displayName,places.formattedAddress"
 GOOGLE_PLACE_DETAILS_FIELDS = ",".join(
     [
@@ -370,9 +382,7 @@ def index(request):
             )
 
     user_sessions = DiningSession.objects.filter(participants=request.user).distinct()
-    sessions = list(
-        user_sessions.values("id", "name", "proposed_time", "invite_code")
-    )
+    sessions = list(user_sessions.values("id", "name", "proposed_time", "invite_code"))
     created_sessions = list(
         DiningSession.objects.filter(created_by=request.user).values(
             "id", "name", "proposed_time", "invite_code"
@@ -408,7 +418,9 @@ def index(request):
         )
     )
     for restaurant in restaurants:
-        restaurant["formatted_address"] = location_address_map.get(str(restaurant["id"]), "")
+        restaurant["formatted_address"] = location_address_map.get(
+            str(restaurant["id"]), ""
+        )
     return render(
         request,
         "restaurants/index.html",
@@ -422,18 +434,17 @@ def index(request):
     )
 
 
-
 def signup(request):
-    if request.method == 'POST':
+    if request.method == "POST":
         form = UserCreationForm(request.POST)
         if form.is_valid():
             user = form.save()
             login(request, user)
-            return redirect('restaurants:index')
+            return redirect("restaurants:index")
     else:
         form = UserCreationForm()
 
-    return render(request, 'registration/signup.html', {'form': form})
+    return render(request, "registration/signup.html", {"form": form})
 
 
 def session_results(request, session_id):
@@ -514,7 +525,9 @@ def restaurant_detail(request, session_id, restaurant_id):
     if restaurant.place_id and _get_google_maps_api_key():
         retry_after = _rate_limit_retry_after(request.user.id, "restaurant_detail_page")
         if retry_after:
-            place_details_error = f"Live details are rate-limited. Try again in {retry_after}s."
+            place_details_error = (
+                f"Live details are rate-limited. Try again in {retry_after}s."
+            )
         else:
             try:
                 live_details = _fetch_google_place_details_legacy(restaurant.place_id)
@@ -526,7 +539,9 @@ def restaurant_detail(request, session_id, restaurant_id):
         session=session,
         restaurant=restaurant,
     ).select_related("user")
-    decision_by_user_id = {decision.user_id: decision.decision for decision in decisions}
+    decision_by_user_id = {
+        decision.user_id: decision.decision for decision in decisions
+    }
 
     participants = session.participants.order_by("username")
     participant_rows = []
@@ -560,7 +575,9 @@ def restaurant_detail(request, session_id, restaurant_id):
             "participant_rows": participant_rows,
             "approve_count": approve_count,
             "disapprove_count": disapprove_count,
-            "pending_count": max(participant_count - approve_count - disapprove_count, 0),
+            "pending_count": max(
+                participant_count - approve_count - disapprove_count, 0
+            ),
             "all_approved": all_approved,
         },
     )
@@ -705,7 +722,9 @@ def swipe_restaurant(request, session_id, restaurant_id):
     decision = payload.get("decision")
     allowed = {choice for choice, _ in SwipeDecision.DECISION_CHOICES}
     if decision not in allowed:
-        return JsonResponse({"error": "Decision must be approve or disapprove."}, status=400)
+        return JsonResponse(
+            {"error": "Decision must be approve or disapprove."}, status=400
+        )
 
     SwipeDecision.objects.update_or_create(
         session=session,
@@ -767,10 +786,14 @@ def search_restaurants_by_location(request):
             latitude = float(payload.get("latitude"))
             longitude = float(payload.get("longitude"))
         except (TypeError, ValueError):
-            return JsonResponse({"error": "Valid latitude and longitude are required."}, status=400)
+            return JsonResponse(
+                {"error": "Valid latitude and longitude are required."}, status=400
+            )
 
         if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-            return JsonResponse({"error": "Latitude or longitude is out of range."}, status=400)
+            return JsonResponse(
+                {"error": "Latitude or longitude is out of range."}, status=400
+            )
         location_label = f"Current location ({latitude:.4f}, {longitude:.4f})"
         query_text = "restaurants"
     else:

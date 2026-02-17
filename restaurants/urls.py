@@ -2,10 +2,10 @@ from django.urls import path
 
 from . import views
 
-app_name = 'restaurants'
+app_name = "restaurants"
 
 urlpatterns = [
-    path('', views.index, name='index'),
+    path("", views.index, name="index"),
     path("sessions/create/", views.create_session, name="create_session"),
     path("sessions/join/", views.join_session, name="join_session"),
     path(

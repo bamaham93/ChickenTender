@@ -177,7 +177,9 @@ class LocationRestaurantSearchTests(TestCase):
         session["location_restaurant_addresses"] = {"1": "123 Main St"}
         session.save()
 
-        response = self.client.get(reverse("restaurants:index"), {"clear_location": "1"})
+        response = self.client.get(
+            reverse("restaurants:index"), {"clear_location": "1"}
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["location_label"], "")
@@ -290,7 +292,9 @@ class LocationRestaurantSearchTests(TestCase):
         )
 
     @patch("restaurants.views._search_google_places_restaurants")
-    def test_location_search_with_no_results_clears_persisted_location_state(self, places_mock):
+    def test_location_search_with_no_results_clears_persisted_location_state(
+        self, places_mock
+    ):
         places_mock.return_value = []
 
         session = self.client.session
@@ -348,6 +352,29 @@ class LocationRestaurantSearchTests(TestCase):
         self.assertIn("retry_after", second.json())
 
     @override_settings(GOOGLE_MAPS_API_KEY="")
+    @patch("restaurants.views._search_google_places_restaurants")
+    def test_location_search_uses_environment_api_key_fallback(self, places_mock):
+        places_mock.return_value = []
+
+        with patch.dict(os.environ, {"GOOGLE_MAPS_API_KEY": "env-fallback-key"}):
+            response = self.client.post(
+                reverse("restaurants:search_restaurants_by_location"),
+                data={
+                    "mode": "query",
+                    "query": "Chicago",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        places_mock.assert_called_once_with(
+            "restaurants in Chicago",
+            latitude=None,
+            longitude=None,
+        )
+
+    @override_settings(GOOGLE_MAPS_API_KEY="")
     def test_location_search_logs_warning_when_google_api_key_missing(self):
         with patch.dict(os.environ, {"GOOGLE_MAPS_API_KEY": ""}):
             with self.assertLogs("restaurants.views", level="WARNING") as captured:
@@ -374,7 +401,9 @@ class LocationRestaurantSearchTests(TestCase):
 
     @patch("restaurants.views._fetch_json")
     @unittest.skip("Places API (New) path is intentionally disabled for now.")
-    def test_google_places_new_permission_denied_falls_back_to_legacy(self, fetch_json_mock):
+    def test_google_places_new_permission_denied_falls_back_to_legacy(
+        self, fetch_json_mock
+    ):
         from restaurants.views import _search_google_places_restaurants
 
         denied_payload = (
@@ -428,7 +457,9 @@ class RestaurantPlaceDetailsTests(TestCase):
         )
 
     @patch("restaurants.views._fetch_google_place_details_legacy")
-    def test_restaurant_detail_fetches_place_details_when_place_id_exists(self, details_mock):
+    def test_restaurant_detail_fetches_place_details_when_place_id_exists(
+        self, details_mock
+    ):
         details_mock.return_value = {
             "name": "Place Detail Chicken",
             "place_id": "abc-place-id-123",
@@ -457,11 +488,15 @@ class RestaurantPlaceDetailsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         details_mock.assert_called_once_with("abc-place-id-123")
-        self.assertEqual(response.context["place_details"]["place_id"], "abc-place-id-123")
+        self.assertEqual(
+            response.context["place_details"]["place_id"], "abc-place-id-123"
+        )
         self.assertEqual(response.context["place_details_error"], "")
 
     @patch("restaurants.views._fetch_google_place_details_legacy")
-    def test_restaurant_detail_shows_nonfatal_error_when_place_details_lookup_fails(self, details_mock):
+    def test_restaurant_detail_shows_nonfatal_error_when_place_details_lookup_fails(
+        self, details_mock
+    ):
         details_mock.side_effect = URLError("upstream timeout")
 
         self.client.login(username="detail-user", password="test-pass-123")
@@ -473,7 +508,9 @@ class RestaurantPlaceDetailsTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["place_details"]["place_id"], "abc-place-id-123")
+        self.assertEqual(
+            response.context["place_details"]["place_id"], "abc-place-id-123"
+        )
         self.assertIn("upstream timeout", response.context["place_details_error"])
 
     @patch("restaurants.views._fetch_google_place_details_legacy")
@@ -510,7 +547,9 @@ class RestaurantPlaceDetailsTests(TestCase):
         details_mock.assert_called_once_with("abc-place-id-123")
 
     @patch("restaurants.views._fetch_google_place_details_legacy")
-    def test_restaurant_api_details_returns_warning_on_lookup_failure(self, details_mock):
+    def test_restaurant_api_details_returns_warning_on_lookup_failure(
+        self, details_mock
+    ):
         details_mock.side_effect = URLError("upstream timeout")
 
         self.client.login(username="detail-user", password="test-pass-123")
@@ -563,6 +602,39 @@ class RestaurantPlaceDetailsTests(TestCase):
         self.assertEqual(second.status_code, 429)
         self.assertIn("retry_after", second.json())
 
+    @override_settings(GOOGLE_MAPS_API_KEY="")
+    @patch("restaurants.views._fetch_google_place_details_legacy")
+    def test_restaurant_api_details_uses_environment_api_key_fallback(
+        self, details_mock
+    ):
+        details_mock.return_value = {
+            "name": "Place Detail Chicken",
+            "place_id": "abc-place-id-123",
+            "formatted_address": "123 Main St",
+            "rating": 4.8,
+            "user_ratings_total": 90,
+            "price_level": 2,
+            "business_status": "OPERATIONAL",
+            "types": ["restaurant"],
+            "formatted_phone_number": "(555) 111-2222",
+            "international_phone_number": "+1 555-111-2222",
+            "website": "https://example.com",
+            "maps_url": "https://maps.google.com/?cid=123",
+            "weekday_hours": ["Monday: 9:00 AM - 9:00 PM"],
+            "latitude": 41.88,
+            "longitude": -87.63,
+        }
+        self.client.login(username="detail-user", password="test-pass-123")
+
+        with patch.dict(os.environ, {"GOOGLE_MAPS_API_KEY": "env-fallback-key"}):
+            response = self.client.get(
+                reverse("restaurants:restaurant_api_details", args=[self.restaurant.id])
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        details_mock.assert_called_once_with("abc-place-id-123")
+
 
 class CleanupOldDataCommandTests(TestCase):
     def setUp(self):
@@ -585,14 +657,18 @@ class CleanupOldDataCommandTests(TestCase):
             created_by=self.user,
         )
         DiningSession.objects.filter(id=self.old_session.id).update(created_at=old_time)
-        DiningSession.objects.filter(id=self.recent_session.id).update(created_at=recent_time)
+        DiningSession.objects.filter(id=self.recent_session.id).update(
+            created_at=recent_time
+        )
         self.old_session.refresh_from_db()
         self.recent_session.refresh_from_db()
 
         self.old_restaurant = Restaurant.objects.create(name="Old Restaurant")
         self.recent_restaurant = Restaurant.objects.create(name="Recent Restaurant")
         Restaurant.objects.filter(id=self.old_restaurant.id).update(created_at=old_time)
-        Restaurant.objects.filter(id=self.recent_restaurant.id).update(created_at=recent_time)
+        Restaurant.objects.filter(id=self.recent_restaurant.id).update(
+            created_at=recent_time
+        )
         self.old_restaurant.refresh_from_db()
         self.recent_restaurant.refresh_from_db()
 
@@ -608,8 +684,12 @@ class CleanupOldDataCommandTests(TestCase):
             restaurant=self.recent_restaurant,
             decision=SwipeDecision.DISAPPROVE,
         )
-        SwipeDecision.objects.filter(id=self.old_decision.id).update(updated_at=old_time)
-        SwipeDecision.objects.filter(id=self.recent_decision.id).update(updated_at=recent_time)
+        SwipeDecision.objects.filter(id=self.old_decision.id).update(
+            updated_at=old_time
+        )
+        SwipeDecision.objects.filter(id=self.recent_decision.id).update(
+            updated_at=recent_time
+        )
 
     def test_cleanup_old_data_dry_run_does_not_delete_records(self):
         call_command("cleanup_old_data", "--days", "60", "--dry-run")
@@ -625,6 +705,12 @@ class CleanupOldDataCommandTests(TestCase):
         self.assertFalse(Restaurant.objects.filter(id=self.old_restaurant.id).exists())
         self.assertFalse(SwipeDecision.objects.filter(id=self.old_decision.id).exists())
 
-        self.assertTrue(DiningSession.objects.filter(id=self.recent_session.id).exists())
-        self.assertTrue(Restaurant.objects.filter(id=self.recent_restaurant.id).exists())
-        self.assertTrue(SwipeDecision.objects.filter(id=self.recent_decision.id).exists())
+        self.assertTrue(
+            DiningSession.objects.filter(id=self.recent_session.id).exists()
+        )
+        self.assertTrue(
+            Restaurant.objects.filter(id=self.recent_restaurant.id).exists()
+        )
+        self.assertTrue(
+            SwipeDecision.objects.filter(id=self.recent_decision.id).exists()
+        )

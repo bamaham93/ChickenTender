@@ -36,7 +36,7 @@ def noop_reverse(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('restaurants', '0002_diningsession_sessionparticipant_and_more'),
+        ("restaurants", "0002_diningsession_sessionparticipant_and_more"),
     ]
 
     operations = [

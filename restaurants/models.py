@@ -25,7 +25,9 @@ class DiningSession(models.Model):
     name = models.CharField(max_length=255)
     proposed_time = models.DateTimeField()
     created_by = models.ForeignKey(get_user_model(), on_delete=models.CASCADE)
-    invite_code = models.CharField(max_length=32, unique=True, default=generate_invite_code)
+    invite_code = models.CharField(
+        max_length=32, unique=True, default=generate_invite_code
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     participants = models.ManyToManyField(
         get_user_model(),

@@ -20,8 +20,12 @@ from django.views.decorators.http import require_GET, require_POST
 from .models import DiningSession, Restaurant, SessionParticipant, SwipeDecision
 
 GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
-GOOGLE_PLACES_TEXT_SEARCH_LEGACY_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-GOOGLE_PLACE_DETAILS_LEGACY_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+GOOGLE_PLACES_TEXT_SEARCH_LEGACY_URL = (
+    "https://maps.googleapis.com/maps/api/place/textsearch/json"
+)
+GOOGLE_PLACE_DETAILS_LEGACY_URL = (
+    "https://maps.googleapis.com/maps/api/place/details/json"
+)
 GOOGLE_PLACES_FIELD_MASK = "places.displayName,places.formattedAddress"
 GOOGLE_PLACE_DETAILS_FIELDS = ",".join(
     [
@@ -74,7 +78,9 @@ def _fetch_json(url, *, data=None, headers=None):
         raise URLError("Google Maps API returned a non-JSON response.") from exc
 
 
-def _rate_limit_retry_after(user_id, scope, interval_seconds=EXTERNAL_API_RATE_LIMIT_SECONDS):
+def _rate_limit_retry_after(
+    user_id, scope, interval_seconds=EXTERNAL_API_RATE_LIMIT_SECONDS
+):
     now = time.time()
     key = f"rate_limit:{scope}:user:{user_id}"
     blocked_until = cache.get(key)
@@ -84,7 +90,9 @@ def _rate_limit_retry_after(user_id, scope, interval_seconds=EXTERNAL_API_RATE_L
     return 0
 
 
-def _search_google_places_restaurants(query_text, *, latitude=None, longitude=None, limit=60):
+def _search_google_places_restaurants(
+    query_text, *, latitude=None, longitude=None, limit=60
+):
     # Places API (New) path intentionally disabled for now because SearchText is
     # blocked for the current project key. Keeping this code for later re-enable:
     #
@@ -144,7 +152,9 @@ def _search_google_places_restaurants(query_text, *, latitude=None, longitude=No
     )
 
 
-def _search_google_places_restaurants_legacy(query_text, *, latitude=None, longitude=None, limit=60):
+def _search_google_places_restaurants_legacy(
+    query_text, *, latitude=None, longitude=None, limit=60
+):
     params = {
         "query": query_text,
         "key": _get_google_maps_api_key(),
@@ -156,7 +166,9 @@ def _search_google_places_restaurants_legacy(query_text, *, latitude=None, longi
     payload = _fetch_json(f"{GOOGLE_PLACES_TEXT_SEARCH_LEGACY_URL}?{urlencode(params)}")
     status = (payload.get("status") or "").strip()
     if status not in {"OK", "ZERO_RESULTS"}:
-        error_message = (payload.get("error_message") or status or "Unknown legacy Places error").strip()
+        error_message = (
+            payload.get("error_message") or status or "Unknown legacy Places error"
+        ).strip()
         raise URLError(error_message)
 
     seen = set()
@@ -179,7 +191,9 @@ def _search_google_places_restaurants_legacy(query_text, *, latitude=None, longi
             rating = None
 
         try:
-            user_ratings_total = int(user_ratings_total) if user_ratings_total is not None else None
+            user_ratings_total = (
+                int(user_ratings_total) if user_ratings_total is not None else None
+            )
         except (TypeError, ValueError):
             user_ratings_total = None
 
@@ -221,11 +235,13 @@ def _fetch_google_place_details_legacy(place_id):
     payload = _fetch_json(f"{GOOGLE_PLACE_DETAILS_LEGACY_URL}?{urlencode(params)}")
     status = (payload.get("status") or "").strip()
     if status not in {"OK", "ZERO_RESULTS"}:
-        error_message = (payload.get("error_message") or status or "Unknown place details error").strip()
+        error_message = (
+            payload.get("error_message") or status or "Unknown place details error"
+        ).strip()
         raise URLError(error_message)
 
     result = payload.get("result") or {}
-    location = ((result.get("geometry") or {}).get("location") or {})
+    location = (result.get("geometry") or {}).get("location") or {}
     lat = location.get("lat")
     lng = location.get("lng")
     try:
@@ -237,7 +253,7 @@ def _fetch_google_place_details_legacy(place_id):
     except (TypeError, ValueError):
         lng = None
 
-    weekday_hours = ((result.get("opening_hours") or {}).get("weekday_text") or [])
+    weekday_hours = (result.get("opening_hours") or {}).get("weekday_text") or []
     if not isinstance(weekday_hours, list):
         weekday_hours = []
     types = result.get("types") or []
@@ -254,7 +270,9 @@ def _fetch_google_place_details_legacy(place_id):
         "business_status": (result.get("business_status") or "").strip(),
         "types": types,
         "formatted_phone_number": (result.get("formatted_phone_number") or "").strip(),
-        "international_phone_number": (result.get("international_phone_number") or "").strip(),
+        "international_phone_number": (
+            result.get("international_phone_number") or ""
+        ).strip(),
         "website": (result.get("website") or "").strip(),
         "maps_url": (result.get("url") or "").strip(),
         "weekday_hours": weekday_hours,
@@ -301,7 +319,9 @@ def _save_restaurants_to_db(places):
             restaurant, _ = Restaurant.objects.get_or_create(name=name)
 
         if restaurant.name != name:
-            name_taken = Restaurant.objects.filter(name=name).exclude(id=restaurant.id).exists()
+            name_taken = (
+                Restaurant.objects.filter(name=name).exclude(id=restaurant.id).exists()
+            )
             if not name_taken:
                 restaurant.name = name
 

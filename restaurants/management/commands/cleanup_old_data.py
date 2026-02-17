@@ -41,7 +41,9 @@ class Command(BaseCommand):
         )
 
         if dry_run:
-            self.stdout.write(self.style.WARNING("Dry run only. No records were deleted."))
+            self.stdout.write(
+                self.style.WARNING("Dry run only. No records were deleted.")
+            )
             return
 
         deleted_decisions, _ = old_decisions.delete()
