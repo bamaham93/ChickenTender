@@ -273,17 +273,21 @@ class LocationRestaurantSearchTests(TestCase):
     def test_location_search_surfaces_upstream_error_reason(self, places_mock):
         places_mock.side_effect = URLError("403 Forbidden")
 
-        response = self.client.post(
-            reverse("restaurants:search_restaurants_by_location"),
-            data={
-                "mode": "query",
-                "query": "Chicago",
-            },
-            content_type="application/json",
-        )
+        with self.assertLogs("restaurants.views", level="ERROR") as captured:
+            response = self.client.post(
+                reverse("restaurants:search_restaurants_by_location"),
+                data={
+                    "mode": "query",
+                    "query": "Chicago",
+                },
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 502)
         self.assertIn("403 Forbidden", response.json()["error"])
+        self.assertTrue(
+            any("Location search upstream failure." in line for line in captured.output)
+        )
 
     @patch("restaurants.views._search_google_places_restaurants")
     def test_location_search_with_no_results_clears_persisted_location_state(self, places_mock):
@@ -342,6 +346,30 @@ class LocationRestaurantSearchTests(TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 429)
         self.assertIn("retry_after", second.json())
+
+    @override_settings(GOOGLE_MAPS_API_KEY="")
+    def test_location_search_logs_warning_when_google_api_key_missing(self):
+        with self.assertLogs("restaurants.views", level="WARNING") as captured:
+            response = self.client.post(
+                reverse("restaurants:search_restaurants_by_location"),
+                data={
+                    "mode": "query",
+                    "query": "Chicago",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["error"],
+            "Google Places API key is not configured.",
+        )
+        self.assertTrue(
+            any(
+                "Location search blocked: GOOGLE_MAPS_API_KEY is missing." in line
+                for line in captured.output
+            )
+        )
 
     @patch("restaurants.views._fetch_json")
     @unittest.skip("Places API (New) path is intentionally disabled for now.")

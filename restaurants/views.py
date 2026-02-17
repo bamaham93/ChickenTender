@@ -1,6 +1,9 @@
 import json
 import math
+import logging
+import os
 import time
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -18,6 +21,8 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .models import DiningSession, Restaurant, SessionParticipant, SwipeDecision
 from .GoogleMapsApi import _fetch_json, _rate_limit_retry_after, _search_google_places_restaurants, _fetch_google_place_details_legacy, _extract_google_error_message, _save_restaurants_to_db
+
+logger = logging.getLogger(__name__)
 
 
 GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
@@ -47,6 +52,23 @@ LOCATION_SESSION_KEY = "location_restaurant_ids"
 LOCATION_LABEL_SESSION_KEY = "location_label"
 LOCATION_ADDRESS_MAP_SESSION_KEY = "location_restaurant_addresses"
 EXTERNAL_API_RATE_LIMIT_SECONDS = 2
+
+
+def _log_missing_google_maps_api_key(request, mode):
+    expected_dotenv_path = Path(settings.BASE_DIR) / "chickentender" / ".env"
+    logger.warning(
+        "Location search blocked: GOOGLE_MAPS_API_KEY is missing. "
+        "user_id=%s mode=%s path=%s settings_has_key=%s env_has_key=%s "
+        "expected_dotenv_path=%s expected_dotenv_exists=%s django_settings_module=%s",
+        getattr(request.user, "id", None),
+        mode,
+        request.path,
+        bool(settings.GOOGLE_MAPS_API_KEY),
+        bool(os.environ.get("GOOGLE_MAPS_API_KEY")),
+        expected_dotenv_path,
+        expected_dotenv_path.exists(),
+        os.environ.get("DJANGO_SETTINGS_MODULE", ""),
+    )
 
 
 # def _fetch_json(url, *, data=None, headers=None):
@@ -727,6 +749,7 @@ def search_restaurants_by_location(request):
     latitude = None
     longitude = None
     if not settings.GOOGLE_MAPS_API_KEY:
+        _log_missing_google_maps_api_key(request, mode)
         return JsonResponse(
             {"error": "Google Places API key is not configured."},
             status=503,
@@ -760,6 +783,15 @@ def search_restaurants_by_location(request):
         )
     except URLError as exc:
         message = _extract_google_error_message(exc)
+        logger.exception(
+            "Location search upstream failure. user_id=%s mode=%s query_text=%s latitude=%s longitude=%s error=%s",
+            request.user.id,
+            mode,
+            query_text,
+            latitude,
+            longitude,
+            message,
+        )
         return JsonResponse(
             {"error": f"Restaurant lookup failed: {message}"},
             status=502,
