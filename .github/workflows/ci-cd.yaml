@@ -40,37 +40,44 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.1.0
         with:
-          host: ${{ secrets.PA_HOST_SSH }}          # e.g. ssh.pythonanywhere.com
-          username: ${{ secrets.PA_USERNAME }}  # your PA username
-          key: ${{ secrets.PA_SSH_PRIVATE_KEY }}# private key for PA SSH
+          host: ${{ secrets.PA_HOST_SSH }}
+          username: ${{ secrets.PA_USERNAME }}
+          key: ${{ secrets.PA_SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
             set -x
 
-            # IMPORTANT: change this to the folder where the repo is cloned on PythonAnywhere
-            cd /home/${{ secrets.PA_USERNAME }}/ChickenTender
+            PROJECT_DIR="/home/${{ secrets.PA_USERNAME }}/ChickenTender"
+            VENV_PATH="/home/${{ secrets.PA_USERNAME }}/.virtualenvs/hbc-env"
 
-            # Make sure we can see the commit, then deploy exactly what GitHub built
+            cd "$PROJECT_DIR"
+
+            echo "Before update:"
+            git rev-parse HEAD || true
+
             git fetch origin
             git checkout main
             git reset --hard ${{ github.sha }}
 
-            echo "Deployed commit:"
+            echo "After update:"
             git rev-parse HEAD
             git log -1 --oneline
 
-            # Optional (uncomment if you want to install/update deps on deploy)
-            # workon YOUR_VENV_NAME
-            # pip install -r requirements.txt
+            echo "Activating PythonAnywhere virtualenv"
+            source "$VENV_PATH/bin/activate"
+
+            echo "Installing dependencies"
+            pip install --upgrade pip
+            pip install -r requirements.txt
 
       - name: Reload PythonAnywhere webapp
         env:
-          PA_API_TOKEN: ${{ secrets.PA_API_KEY }}       # PythonAnywhere API token
+          PA_API_TOKEN: ${{ secrets.PA_API_KEY }}
           PA_USERNAME: ${{ secrets.PA_USERNAME }}
-          PA_DOMAIN_NAME: ${{ secrets.PA_DOMAIN_NAME }} # e.g. yourusername.pythonanywhere.com
+          PA_DOMAIN_NAME: ${{ secrets.PA_DOMAIN_NAME }}
         run: |
           if [ -z "${PA_API_TOKEN}" ]; then
-            echo "PA_API_TOKEN is empty (GitHub secret missing or not exposed)"
+            echo "PA_API_TOKEN is empty"
             exit 1
           fi
 
