@@ -3,7 +3,11 @@ name: CI/CD
 on:
   pull_request:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+
+concurrency:
+  group: deploy-pythonanywhere
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -33,18 +37,43 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Write SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.PA_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.PA_HOST }}          # e.g. ssh.pythonanywhere.com
+          username: ${{ secrets.PA_USERNAME }}  # your PA username
+          key: ${{ secrets.PA_SSH_PRIVATE_KEY }}# private key for PA SSH
+          script: |
+            set -euo pipefail
+            set -x
 
-      - name: Add host key
+            # IMPORTANT: change this to the folder where the repo is cloned on PythonAnywhere
+            cd /home/${{ secrets.PA_USERNAME }}/ChickenTender
+
+            # Make sure we can see the commit, then deploy exactly what GitHub built
+            git fetch origin
+            git checkout main
+            git reset --hard ${{ github.sha }}
+
+            echo "Deployed commit:"
+            git rev-parse HEAD
+            git log -1 --oneline
+
+            # Optional (uncomment if you want to install/update deps on deploy)
+            # workon YOUR_VENV_NAME
+            # pip install -r requirements.txt
+
+      - name: Reload PythonAnywhere webapp
         env:
-          PA_HOST: ${{ secrets.PA_HOST }}
+          PA_API_TOKEN: ${{ secrets.PA_API_KEY }}       # PythonAnywhere API token
+          PA_USERNAME: ${{ secrets.PA_USERNAME }}
+          PA_DOMAIN_NAME: ${{ secrets.PA_DOMAIN_NAME }} # e.g. yourusername.pythonanywhere.com
         run: |
-          HOST="${PA_HOST:-ssh.pythonanywhere.com}"
-          ssh-keyscan -H "${HOST}" >> ~/.ssh/known_hosts
+          if [ -z "${PA_API_TOKEN}" ]; then
+            echo "PA_API_TOKEN is empty (GitHub secret missing or not exposed)"
+            exit 1
+          fi
 
-      
-
+          curl -sS -X POST \
+            -H "Authorization: Token ${PA_API_TOKEN}" \
+            "https://www.pythonanywhere.com/api/v0/user/${PA_USERNAME}/webapps/${PA_DOMAIN_NAME}/reload/"

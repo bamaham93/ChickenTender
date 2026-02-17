@@ -32,7 +32,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-d@y=2-=p9fvedvp-qvvuo^3&q59lwu4xy$bl7v148b8kyhr0ma"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ["bamaham93.pythonanywhere.com", "localhost"]
 
@@ -129,3 +129,9 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 LOGIN_REDIRECT_URL = "restaurants:index"
 LOGOUT_REDIRECT_URL = "restaurants:index"
+
+if os.environ.get("ENVIRONMENT") == "dev":
+    from .settings_dev import *
+
+if os.environ.get("ENVIRONMENT") == "prod":
+    pass
