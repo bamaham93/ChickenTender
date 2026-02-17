@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -45,6 +46,13 @@ LOCATION_SESSION_KEY = "location_restaurant_ids"
 LOCATION_LABEL_SESSION_KEY = "location_label"
 LOCATION_ADDRESS_MAP_SESSION_KEY = "location_restaurant_addresses"
 EXTERNAL_API_RATE_LIMIT_SECONDS = 2
+
+
+def _get_google_maps_api_key():
+    return (
+        (getattr(settings, "GOOGLE_MAPS_API_KEY", "") or "")
+        or (os.environ.get("GOOGLE_MAPS_API_KEY", "") or "")
+    ).strip()
 
 
 def _fetch_json(url, *, data=None, headers=None):
@@ -139,7 +147,7 @@ def _search_google_places_restaurants(query_text, *, latitude=None, longitude=No
 def _search_google_places_restaurants_legacy(query_text, *, latitude=None, longitude=None, limit=60):
     params = {
         "query": query_text,
-        "key": settings.GOOGLE_MAPS_API_KEY,
+        "key": _get_google_maps_api_key(),
     }
     if latitude is not None and longitude is not None:
         params["location"] = f"{latitude},{longitude}"
@@ -208,7 +216,7 @@ def _fetch_google_place_details_legacy(place_id):
     params = {
         "place_id": place_id,
         "fields": GOOGLE_PLACE_DETAILS_FIELDS,
-        "key": settings.GOOGLE_MAPS_API_KEY,
+        "key": _get_google_maps_api_key(),
     }
     payload = _fetch_json(f"{GOOGLE_PLACE_DETAILS_LEGACY_URL}?{urlencode(params)}")
     status = (payload.get("status") or "").strip()

@@ -349,15 +349,16 @@ class LocationRestaurantSearchTests(TestCase):
 
     @override_settings(GOOGLE_MAPS_API_KEY="")
     def test_location_search_logs_warning_when_google_api_key_missing(self):
-        with self.assertLogs("restaurants.views", level="WARNING") as captured:
-            response = self.client.post(
-                reverse("restaurants:search_restaurants_by_location"),
-                data={
-                    "mode": "query",
-                    "query": "Chicago",
-                },
-                content_type="application/json",
-            )
+        with patch.dict(os.environ, {"GOOGLE_MAPS_API_KEY": ""}):
+            with self.assertLogs("restaurants.views", level="WARNING") as captured:
+                response = self.client.post(
+                    reverse("restaurants:search_restaurants_by_location"),
+                    data={
+                        "mode": "query",
+                        "query": "Chicago",
+                    },
+                    content_type="application/json",
+                )
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(

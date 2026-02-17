@@ -20,7 +20,7 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import DiningSession, Restaurant, SessionParticipant, SwipeDecision
-from .GoogleMapsApi import _fetch_json, _rate_limit_retry_after, _search_google_places_restaurants, _fetch_google_place_details_legacy, _extract_google_error_message, _save_restaurants_to_db
+from .GoogleMapsApi import _fetch_json, _rate_limit_retry_after, _search_google_places_restaurants, _fetch_google_place_details_legacy, _extract_google_error_message, _save_restaurants_to_db, _get_google_maps_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +58,14 @@ def _log_missing_google_maps_api_key(request, mode):
     expected_dotenv_path = Path(settings.BASE_DIR) / "chickentender" / ".env"
     logger.warning(
         "Location search blocked: GOOGLE_MAPS_API_KEY is missing. "
-        "user_id=%s mode=%s path=%s settings_has_key=%s env_has_key=%s "
+        "user_id=%s mode=%s path=%s settings_has_key=%s env_has_key=%s effective_has_key=%s "
         "expected_dotenv_path=%s expected_dotenv_exists=%s django_settings_module=%s",
         getattr(request.user, "id", None),
         mode,
         request.path,
         bool(settings.GOOGLE_MAPS_API_KEY),
         bool(os.environ.get("GOOGLE_MAPS_API_KEY")),
+        bool(_get_google_maps_api_key()),
         expected_dotenv_path,
         expected_dotenv_path.exists(),
         os.environ.get("DJANGO_SETTINGS_MODULE", ""),
@@ -510,7 +511,7 @@ def restaurant_detail(request, session_id, restaurant_id):
         "longitude": None,
     }
     place_details_error = ""
-    if restaurant.place_id and settings.GOOGLE_MAPS_API_KEY:
+    if restaurant.place_id and _get_google_maps_api_key():
         retry_after = _rate_limit_retry_after(request.user.id, "restaurant_detail_page")
         if retry_after:
             place_details_error = f"Live details are rate-limited. Try again in {retry_after}s."
@@ -600,7 +601,7 @@ def restaurant_api_details(request, restaurant_id):
     }
     warning = ""
 
-    if restaurant.place_id and settings.GOOGLE_MAPS_API_KEY:
+    if restaurant.place_id and _get_google_maps_api_key():
         try:
             live_details = _fetch_google_place_details_legacy(restaurant.place_id)
             details.update(live_details)
@@ -748,7 +749,7 @@ def search_restaurants_by_location(request):
     query_text = ""
     latitude = None
     longitude = None
-    if not settings.GOOGLE_MAPS_API_KEY:
+    if not _get_google_maps_api_key():
         _log_missing_google_maps_api_key(request, mode)
         return JsonResponse(
             {"error": "Google Places API key is not configured."},
